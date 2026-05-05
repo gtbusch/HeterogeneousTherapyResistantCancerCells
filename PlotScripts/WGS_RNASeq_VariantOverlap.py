@@ -77,9 +77,9 @@ def save_outputs(overlap_df, tsv_path, xlsx_path):
 # FILE PATHS — edit these to point to your input files and output directory
 # =============================================================================
 
-WGS_FILE = "'/Users/giannabusch/RajLab Dropbox/Gianna Busch/Shared_GiannaB/Paper_Submission/WorkingPaper/Paper_DataandCode/ExtractedData/WholeGenomeSequencing/WGS_ExonicSNPs/wgs_comparison_table.txt'"
-RNA_FILE  = "'/Users/giannabusch/RajLab Dropbox/Gianna Busch/Shared_GiannaB/Paper_Submission/WorkingPaper/Paper_DataandCode/ExtractedData/WholeGenomeSequencing/RNASeq_forCloneMatching/varianttxtfiles/rnaseq_variants_comparison_table.txt'"
-OUTPUT_DIR = "'/Users/giannabusch/RajLab Dropbox/Gianna Busch/Shared_GiannaB/Paper_Submission/WorkingPaper/Paper_DataandCode/Plots'"          # e.g. "/home/user/results" or "C:/Users/me/results"
+WGS_FILE = "wgs_comparison_table.txt"
+RNA_FILE  = "varianttxtfiles/rnaseq_variants_comparison_table.txt"
+OUTPUT_DIR = "."          # e.g. "/home/user/results" or "C:/Users/me/results"
 
 # =============================================================================
 
