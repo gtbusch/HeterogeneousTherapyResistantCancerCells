@@ -1,0 +1,620 @@
+---
+title: "IDACombo Graphs"
+output: html_document
+date: "2025-04-17"
+---
+
+This is part 2 of 2 scripts. This script generates graphs for the IDACombo results on the BRAF resistant clones. 
+
+Note, for 3D plots to work, the computer needs to use OpenGL. On a Mac, this requires downloading and properly instealling XQuartz. 
+
+#Start 
+
+```{r}
+library(tidyverse)
+library(rgl)
+library(car)
+library(common)
+set.seed(20250410)
+
+All_IDACombo_Scores <- read_tsv(file = "./IDACombo_Output_noParental.tsv")
+```
+
+# IDACombo Score Analysis Notes/Justification
+
+There are many ways to look at IDACombo scores. We can focus on max concentration, max achievable concentration (Csustained), average IDACombo score, max IDACombo score, IDACombo scores for meaningful tested concentrations (e.g. the monotherapies reduced viability to 90% or less). None are inherently right or wrong, the interpretations is just different.  
+
+One would be to just look at a particular dose. In our original publication, we were focused on the Csustained concentrations for drug combinations and the graphs reflect just that. If we are interested in a particular dose for these drugs, this would be the correct choice, but we aren't really interested in a particular dose. 
+
+A better way would be to look at an average IDACombo score across all the doses. The reason for this is that it would indicate that the combination of drugs would be efficacious at various drug doses and isn't reliant on just one dose. Since we don't know what concentrations these drugs would be used in the clinic necessarily, doing single dose concentrations will not be used. 
+
+
+## Plot Data
+
+```{r}
+avg_IDACombo_Results <- All_IDACombo_Scores %>% 
+  group_by(Drug1, Drug2) %>% 
+  summarize(n_sig_IDACombo = sum(p_adj_IDACombo < 0.05) , 
+            Avg_IDACombo = mean(IDA_Comboscore) , 
+            Median_IDACombo = median(IDA_Comboscore) , 
+            Min_IDACombo = min(IDA_Comboscore) ,
+            Max_IDACombo = max(IDA_Comboscore) ,
+            Max_Efficacy_1 = min(Mean_Drug1_Viability),
+            Max_Efficacy_2 = min(Mean_Drug2_Viability)) %>% 
+  ungroup() %>% 
+  arrange(desc(Avg_IDACombo))
+
+
+effective_dose_avg_IDACombo_results <- All_IDACombo_Scores %>% 
+  filter(Mean_Drug1_Viability < 90, Mean_Drug2_Viability < 90) %>% 
+  group_by(Drug1, Drug2) %>% 
+  summarize(n_sig_IDACombo = sum(p_adj_IDACombo < 0.05) , 
+            ratio_sig_IDACombo = n_sig_IDACombo/length(p_adj_IDACombo), 
+            Avg_IDACombo = mean(IDA_Comboscore) , 
+            Median_IDACombo = median(IDA_Comboscore) , 
+            Min_IDACombo = min(IDA_Comboscore) ,
+            Max_IDACombo = max(IDA_Comboscore) ,
+            Max_Efficacy_1 = min(Mean_Drug1_Viability),
+            Max_Efficacy_2 = min(Mean_Drug2_Viability)) %>% 
+  ungroup() %>% 
+  arrange(desc(Avg_IDACombo))
+
+
+```
+
+
+
+### Interesting Cut-offs
+
+```{r}
+#Maximum efficacy
+avg_IDACombo_Results %>% 
+  select(Drug1, Max_Efficacy_1) %>% 
+  filter(Max_Efficacy_1 > 50) %>% 
+  distinct()
+
+hist(avg_IDACombo_Results$Avg_IDACombo)
+hist(avg_IDACombo_Results$n_sig_IDACombo)
+
+```
+
+From the first plot above, it shows that the average IDACombo scores really fall off after 1. This is an arbitrary metric, but using 1 as a heuristic for the seems reasonable to identify effective drug combinations. 
+
+From the second plot above, there is a more gradual decrease in the number of significant IDACombo scores for every drug pair, but the maximum is around 14. The theoretical maximum value it could be is 64 since there are 8 doses for each drug (8x8 combinations per drug).  Looking at the data, I think 6 or 8 would be a reasonable cut-off as it would mean 10 or 12.5% respectively of the 64 possible combinations. 
+
+
+## Spot Plots
+
+Define a bunch of theme settings for the spot plots below
+```{r}
+
+spot.theme <- list(
+  theme_classic(),
+  theme(axis.ticks.x=element_blank(), axis.text.x=element_text(angle = 65, hjust = 0)),
+  theme(axis.ticks.y=element_blank()),
+  theme(axis.line=element_blank()),
+  theme(legend.key.size = unit(0.4, units = "cm")), 
+  theme(legend.box = "horizontal"), 
+  theme(legend.position.inside = c(0.82, 0.25)),
+  theme(legend.title = element_text(size = 8)),
+  theme(legend.text = element_text(size = 6)) ,
+  scale_size_continuous(range = c(-0.2, 3.5)),
+  scale_color_manual(values = c(NA, "black")), 
+  scale_fill_gradient(low = "white", high = "darkred"), 
+  scale_x_discrete(position = "top"))
+
+```
+
+
+
+```{r}
+plot_avg_IDACombo_data <- avg_IDACombo_Results %>% 
+  mutate(interesting = if_else(n_sig_IDACombo >= 8 & #see explanation above for 16
+                                 Avg_IDACombo > 1, #see explanation above for 1
+                               "interesting", "not"))
+
+only_interesting_plot_data <- plot_avg_IDACombo_data %>% #separating this out so I can box the "interesting" points
+  filter(interesting == "interesting")
+
+plot_avg_IDACombo_data %>% 
+  #filter(n_sig_IDACombo > 3) %>% #this could be used to remove the faintest of circles if they are distracting
+  #filter(!(Max_Efficacy_1 > 50 | Max_Efficacy_2 > 50)) %>% #removes te 2 drugs that don't ever kill 50% as a monotherapy, cleans up the axes a little bit
+  ggplot(aes(Drug1, Drug2)) + spot.theme +
+    geom_tile(data = only_interesting_plot_data, color = "black", fill = "white", lwd = 0.5) + #highlights the combinations that meet above "interesting" criteria
+    geom_point(aes(size = n_sig_IDACombo, fill = Avg_IDACombo), shape = 21, color = "white" ) + 
+    guides(size = guide_legend(position = "inside", override.aes = list(fill = "darkred")), 
+           fill = guide_colorbar(position = "inside")) + 
+    labs(title = "Drug Combination Analysis by IDA", 
+         x = NULL, 
+         y = NULL, 
+         fill = "     Average\nIDACombo Score", 
+         size = "n Significant\nIDACombo Scores")
+```
+
+
+
+## Effective Dose stuff
+Another potentially interesting route to look at is only looking at effective doses, that is doses for which the drug causes meaningful changes to viability
+
+### Interesting Cut-offs
+
+```{r}
+hist(effective_dose_avg_IDACombo_results$Avg_IDACombo)
+hist(effective_dose_avg_IDACombo_results$n_sig_IDACombo)
+hist(effective_dose_avg_IDACombo_results$ratio_sig_IDACombo)
+
+```
+
+As expected, the average is much higher because we are removing a lot of points where the IDACombo for those doses would naturally be 0. Seems like things really drop off after an average of 2 though, so I'll use 2. 
+
+This reduces the number of significant IDACombo scores as well, which also makes sense. A seemingly reasonable cutoff would be 4. 
+
+For the ratio of significant values, this one doesn't have as steep of a drop off. It seems like another reasonable cutoff seems like it would be... 0.5. 
+
+```{r}
+
+plot_effective_IDACombo_data <- effective_dose_avg_IDACombo_results %>% 
+  mutate(interesting = if_else(n_sig_IDACombo > 5 & #see explanation above for 16
+                                 Avg_IDACombo > 2 & #see explanation above for 1
+                                ratio_sig_IDACombo > 0.5, 
+                               "interesting", "not"))
+
+only_interesting_plot_data <- plot_effective_IDACombo_data %>% #separating this out so I can box the "interesting" points
+  filter(interesting == "interesting")
+
+effective_dose_avg_IDACombo_results %>% 
+  #filter(n_sig_IDACombo > 3) %>% #this could be used to remove the faintest of circles if they are distracting
+  #filter(!(Max_Efficacy_1 > 50 | Max_Efficacy_2 > 50)) %>% #removes te 2 drugs that don't ever kill 50% as a monotherapy, cleans up the axes a little bit
+  ggplot(aes(Drug1, Drug2)) + spot.theme +
+    geom_tile(data = only_interesting_plot_data, color = "black", fill = "white", lwd = 0.5) + #highlights the combinations that meet above "interesting" criteria
+    geom_point(aes(size = n_sig_IDACombo, fill = Avg_IDACombo), shape = 21, color = "white" ) + 
+    guides(size = guide_legend(position = "inside", override.aes = list(fill = "darkred")), 
+           fill = guide_colorbar(position = "inside")) + 
+    labs(title = "Drug Combination Analysis by IDA", 
+         x = NULL, 
+         y = NULL, 
+         fill = "     Average\nIDACombo Score", 
+         size = "n Significant\nIDACombo Scores")
+```
+
+
+Below is if you wanted to look at max IDACombo score. 
+I'm not entirely sure what would be good cutoffs here. One could do histograms as well, but the n_sig might not be a good idea to use any more since we are just looking at one value for each combination. That value is essentially always significant. 
+
+
+```{r, include=FALSE}
+
+plot_max_IDACombo_data <- avg_IDACombo_Results %>% 
+  mutate(interesting = if_else(n_sig_IDACombo >= 16 & #see explanation above for 16
+                                 Max_IDACombo > 8, #
+                               "interesting", "not"))
+
+only_interesting_plot_data_max <- plot_max_IDACombo_data %>% #separating this out so I can box the "interesting" points
+  filter(interesting == "interesting")
+
+
+plot_max_IDACombo_data %>% 
+  #filter(n_sig_IDACombo > 3) %>% #this could be used to remove the faintest of circles if they are distracting
+  filter(!(Max_Efficacy_1 > 50 | Max_Efficacy_2 > 50)) %>% #removes te 2 drugs that don't ever kill 50% as a monotherapy, cleans up the axes a little bit
+  ggplot(aes(Drug1, Drug2)) + spot.theme +
+    geom_tile(data = only_interesting_plot_data_max, color = "black", fill = "white", lwd = 0.5) + 
+    geom_point(aes(size = n_sig_IDACombo, fill = Max_IDACombo), shape = 21, color = "white" )
+
+```
+
+# Single Drug Combination Plots
+
+For the analysis of average IDACombo scores, there were 3 combinations that met the criteria of having 16 significant IDACombo concentrations as well as an average IDACombo score of above 1: 
+  Deguelin & SB273005
+  Dasatinib & Deguelin
+  IWP-01 & SB273005
+
+We can visualize the IDACombo effect on a 3D plot showing dose of Drug1 on x, dose of Drug 2 on y, and efficacy on the z-axis 
+
+
+## Deguelin & SB273005
+
+```{r}
+
+  #Making 3-d plots for Deguelin & SB273005
+first_drug <- "Deguelin"
+second_drug <- "SB273005"
+    #Navitoclax + Paclitaxel
+      #Getting Data
+NP.data <- All_IDACombo_Scores %>% filter(Drug1 == first_drug & Drug2 == second_drug)
+plot.data <- NP.data[,c("Drug1", "Drug2", "Drug1Dose", "Drug2Dose", "Mean_Combo_Viability", "IDA_Comboscore", "MaxHR")]
+      #Adding group info
+        plot.data$Group <- "Predicted Combination"
+        plot.data$Group[plot.data$Drug1Dose == min(plot.data$Drug1Dose)] <- paste0(unique(plot.data$Drug2), " Monotherapy")
+        plot.data$Group[plot.data$Drug2Dose == min(plot.data$Drug2Dose)] <- paste0(unique(plot.data$Drug1), " Monotherapy")
+        
+        #Adding origin point
+        to.add <- as.data.frame(matrix(c(min(plot.data$Drug1Dose), min(plot.data$Drug1Dose), 
+                                         min(plot.data$Drug1Dose), min(plot.data$Drug1Dose),
+                                         0, 0, 0, 
+                                       "Origin"), ncol = ncol(plot.data)))
+        colnames(to.add) <- colnames(plot.data)
+        plot.data <- rbind(plot.data, to.add)
+
+      #Turning Group column into factor
+        plot.data$Group <- factor(plot.data$Group, levels = c(paste(first_drug, "Monotherapy"), 
+                                                              paste(second_drug, "Monotherapy"), 
+                                                              "Origin", 
+                                                              "Predicted Combination"))
+      #Making doses, viabilities, comboscores, and HRs into numeric
+        plot.data$Drug1Dose <- as.numeric(plot.data$Drug1Dose)
+        plot.data$Drug2Dose <- as.numeric(plot.data$Drug2Dose)
+        plot.data$Mean_Combo_Viability <- as.numeric(plot.data$Mean_Combo_Viability)
+        plot.data$IDA_Comboscore <- as.numeric(plot.data$IDA_Comboscore)
+        plot.data$MaxHR <- as.numeric(plot.data$MaxHR)
+
+
+```
+
+
+### Viewpoints
+
+Can get viewpoint by messing around with 
+```{r}
+viewpoint_1 <-  matrix(c(0.345053881,  0.000000000, -0.938582897,    0,
+                         0.006618641,  0.999975145,  0.002433229,    0,
+                         0.938559592, -0.007051738,  0.345045298,    0,
+                         0.00000000,  0.00000000,  0.0000000,    1), 
+                                      nrow = 4, ncol = 4, byrow = T)  
+
+viewpoint_2 <-  matrix(c(0.4564144,  0.0000000,  -0.8897673,     0,
+                         -0.1831407,  0.9785878, -0.0939437,    0,
+                         0.8707155,  0.2058298,  0.4466416,    0,
+                         0.00000000,  0.00000000,  0.0000000,    1), 
+                                      nrow = 4, ncol = 4, byrow = T) 
+
+
+viewpoint_3 <-  matrix(c(0.69566524, 0.00000000, -0.71836609,    0,
+                         -0.03320106, 0.99893141, -0.03215188,    0,
+                         0.71759844, 0.04621746,  0.69492185,    0,
+                         0.00000000, 0.00000000,  0.00000000,    1), 
+                                      nrow = 4, ncol = 4, byrow = T)  
+
+viewpoint_4 <-  matrix(c(0.96666247, 0.0000000, -0.25605410,    0,
+                         -0.02571049, 0.9949461, -0.09706296,    0,
+                         0.25476003, 0.1004104,  0.96177709,    0,
+                         0.00000000, 0.00000000,  0.00000000,    1), 
+                                      nrow = 4, ncol = 4, byrow = T)  
+
+
+```
+
+
+### THE 3D plot
+
+```{r}
+plot.data.log <- plot.data #[plot.data$Group != "Origin", ]
+plot.data.log$Drug1Dose <- log10(plot.data.log$Drug1Dose*1000) # times by 1000 to get nM concentrations
+plot.data.log$Drug2Dose <- log10(plot.data.log$Drug2Dose*1000)
+
+      #Defining Colors
+        colors <- c("blue", "green", "white", "magenta")
+      #Making plots
+        #Plotting Mean Viability
+            scatter3d(x = plot.data.log$Drug2Dose, y = plot.data.log$Mean_Combo_Viability, z = plot.data.log$Drug1Dose, 
+                    surface = F, grid = F, ellipsoid = F, xlab = "", zlab = "", ylab = "", 
+                    groups = plot.data$Group, 
+                    axis.ticks = F, axis.scales = F, 
+                    axis.col = c("blue", "black", "darkgreen"), surface.col = colors, fogtype = "none")
+            
+
+          #Manually adding axis ticks
+            #Note, there is a bug in scatter3d from car_2.1-5 when axis.ticks = T. At line 104,
+            #"x.at <- seq(min.x, max.x, by = nice(diff(range(min.x, max.x))/4))" should be
+            #"x.at <- seq(min.x, max.x, by = diff(range(min.x, max.x))/4)"
+            #There is a newer version of car that may have fixed this, but I would need
+            #to update R and I don't want to risk deprecating the rest of my code for
+            #this project. Thus, manually adding axis marks.
+            
+            at_viability <- seq(0,1, length.out = 5)
+            y.labels <- seq(0,100, length.out = 5)[1:5]
+            
+            at_dose <- seq(0,1, length.out = 8)[c(3,5,7)]
+            z.exp <- sort(unique(round(plot.data.log$Drug2Dose, digits = 2)))[c(2,4,6)]
+            z.labels <- c("10" %p% supsc(z.exp[1]), 
+                          "10" %p% supsc(z.exp[2]), 
+                          "10" %p% supsc(z.exp[3]))
+            x.exp <- sort(unique(round(plot.data.log$Drug1Dose, digits = 2)))[c(2,4,6)]
+            x.labels <- c("10" %p% supsc(x.exp[1]), 
+                          "10" %p% supsc(x.exp[2]), 
+                          "10" %p% supsc(x.exp[3]))
+
+            text3d(-0.05, at_viability, -0.05, 
+                   y.labels, col = "black", cex = 2)
+            text3d(x = at_dose, y = -0.05, z = 0, 
+                   text = x.labels, col = "darkgreen", cex = 2)
+            text3d(x = 0,  y = -0.05, z = at_dose, 
+                   z.labels, col = "blue", cex = 2)
+            
+            # observer3d(0, 0.3, 10) #does not fix the issue
+            # par3d(zoom = 0.1644359)
+            par3d(userMatrix = viewpoint_1)
+          
+            par3d(zoom = 0.7106816)
+
+
+          #Organizing groups to omit Origin in legend
+            groups <- levels(plot.data$Group)
+            origin <- which(groups == "Origin")
+            groups <- groups[-origin]
+          #Adding flat plane at best monotherapy effect
+            best.monotherapy <- min(plot.data$Mean_Combo_Viability[grep("Monotherapy", plot.data$Group)])
+            planes3d(a = 0, b = -1, c = 0, d = best.monotherapy/100, alpha = 0.3, col = "green")
+          #Adding arrow between best monotherapy and best combo
+            max.z <- signif(as.numeric(formatC(seq(0,max(plot.data$Drug1Dose), length.out = 5), format = "g", digits = 2)[5]), 1)
+            max.x <- signif(as.numeric(formatC(seq(0,max(plot.data$Drug2Dose), length.out = 5), format = "g", digits = 2)[5]), 1)
+            max.x.point <- max(plot.data$Drug2Dose)
+            max.z.point <- max(plot.data$Drug1Dose)
+            x.coord <- min(max.x.point/max.x, 1)
+            z.coord <- min(max.z.point/max.z, 1)
+          #Adding legend
+            legend3d("topleft", legend = groups, col = colors[1:(length(groups)+1)][-origin], pch = 16, cex=2, inset=c(0.2, 0.25))
+
+
+```
+
+
+
+```{r}
+# #Saving snapshot
+ snapshot3d(paste(first_drug, second_drug, "3D Plot_v1.png"), webshot = FALSE)
+```
+
+
+## Dasatinib & Deguelin
+
+```{r}
+
+  #Making 3-d plots for Deguelin & SB273005
+first_drug <- "Dasatinib"
+second_drug <- "Deguelin"
+    #Navitoclax + Paclitaxel
+      #Getting Data
+NP.data <- All_IDACombo_Scores %>% filter(Drug1 == first_drug & Drug2 == second_drug)
+plot.data <- NP.data[,c("Drug1", "Drug2", "Drug1Dose", "Drug2Dose", "Mean_Combo_Viability", "IDA_Comboscore", "MaxHR")]
+      #Adding group info
+        plot.data$Group <- "Predicted Combination"
+        plot.data$Group[plot.data$Drug1Dose == min(plot.data$Drug1Dose)] <- paste0(unique(plot.data$Drug2), " Monotherapy")
+        plot.data$Group[plot.data$Drug2Dose == min(plot.data$Drug2Dose)] <- paste0(unique(plot.data$Drug1), " Monotherapy")
+        
+        #Adding origin point
+        to.add <- as.data.frame(matrix(c(min(plot.data$Drug1Dose), min(plot.data$Drug1Dose), 
+                                         min(plot.data$Drug1Dose), min(plot.data$Drug1Dose),
+                                         0, 0, 0, 
+                                       "Origin"), ncol = ncol(plot.data)))
+        colnames(to.add) <- colnames(plot.data)
+        plot.data <- rbind(plot.data, to.add)
+
+      #Turning Group column into factor
+        plot.data$Group <- factor(plot.data$Group, levels = c(paste(first_drug, "Monotherapy"), 
+                                                              paste(second_drug, "Monotherapy"), 
+                                                              "Origin", 
+                                                              "Predicted Combination"))
+      #Making doses, viabilities, comboscores, and HRs into numeric
+        plot.data$Drug1Dose <- as.numeric(plot.data$Drug1Dose)
+        plot.data$Drug2Dose <- as.numeric(plot.data$Drug2Dose)
+        plot.data$Mean_Combo_Viability <- as.numeric(plot.data$Mean_Combo_Viability)
+        plot.data$IDA_Comboscore <- as.numeric(plot.data$IDA_Comboscore)
+        plot.data$MaxHR <- as.numeric(plot.data$MaxHR)
+
+
+```
+
+
+
+
+```{r}
+plot.data.log <- plot.data #[plot.data$Group != "Origin", ]
+plot.data.log$Drug1Dose <- log10(plot.data.log$Drug1Dose*1000) # times by 1000 to get nM concentrations
+plot.data.log$Drug2Dose <- log10(plot.data.log$Drug2Dose*1000)
+
+      #Defining Colors
+        colors <- c("blue", "green", "white", "magenta")
+      #Making plots
+        #Plotting Mean Viability
+            scatter3d(x = plot.data.log$Drug2Dose, y = plot.data.log$Mean_Combo_Viability, z = plot.data.log$Drug1Dose, 
+                    surface = F, grid = F, ellipsoid = F, xlab = "", zlab = "", ylab = "", 
+                    groups = plot.data$Group, 
+                    axis.ticks = F, axis.scales = F, 
+                    axis.col = c("blue", "black", "darkgreen"), surface.col = colors, fogtype = "none")
+            
+
+          #Manually adding axis ticks
+            #Note, there is a bug in scatter3d from car_2.1-5 when axis.ticks = T. At line 104,
+            #"x.at <- seq(min.x, max.x, by = nice(diff(range(min.x, max.x))/4))" should be
+            #"x.at <- seq(min.x, max.x, by = diff(range(min.x, max.x))/4)"
+            #There is a newer version of car that may have fixed this, but I would need
+            #to update R and I don't want to risk deprecating the rest of my code for
+            #this project. Thus, manually adding axis marks.
+            
+            at_viability <- seq(0,1, length.out = 5)
+            y.labels <- seq(0,100, length.out = 5)[1:5]
+            
+            at_dose <- seq(0,1, length.out = 9)[2*1:4 + 1]
+            z.exp <- sort(unique(round(plot.data.log$Drug2Dose, digits = 2)))[2*(1:4)]
+            z.labels <- c("10" %p% supsc(z.exp[1]), 
+                          "10" %p% supsc(z.exp[2]), 
+                          "10" %p% supsc(z.exp[3]), 
+                          "10" %p% supsc(z.exp[4]))
+            x.exp <- sort(unique(round(plot.data.log$Drug1Dose, digits = 2)))[(1:4)]
+            x.labels <- c("10" %p% supsc(x.exp[1]), 
+                          "10" %p% supsc(x.exp[2]), 
+                          "10" %p% supsc(x.exp[3]), 
+                          "10" %p% supsc(x.exp[4]))
+
+            text3d(-0.05, at_viability, -0.05, 
+                   y.labels, col = "black", cex = 2)
+            text3d(x = at_dose, y = -0.05, z = 0, 
+                   text = x.labels, col = "darkgreen", cex = 2)
+            text3d(x = 0,  y = -0.05, z = at_dose, 
+                   z.labels, col = "blue", cex = 2)
+            
+            # observer3d(0, 0.3, 10) #does not fix the issue
+            # par3d(zoom = 0.1644359)
+            par3d(userMatrix = matrix(c(0.34524330,  0.00000000, -0.9385132,    0,
+                                        0.05206683,  0.99845994,  0.0191534,    0,
+                                        0.93706787, -0.05547799,  0.3447116,    0,
+                                        0.00000000,  0.00000000,  0.0000000,    1), nrow = 4, ncol = 4, byrow = T))
+          
+            par3d(zoom = 0.7106816)
+
+
+          #Organizing groups to omit Origin in legend
+            groups <- levels(plot.data.log$Group)
+            origin <- which(groups == "Origin")
+            groups <- groups[-origin]
+          #Adding flat plane at best monotherapy effect
+            best.monotherapy <- min(plot.data.log$Mean_Combo_Viability[grep("Monotherapy", plot.data.log$Group)])
+            planes3d(a = 0, b = -1, c = 0, d = best.monotherapy/100, alpha = 0.3, col = "green")
+          #Adding arrow between best monotherapy and best combo
+            max.z <- signif(as.numeric(formatC(seq(0,max(plot.data.log$Drug1Dose), length.out = 5), format = "g", digits = 2)[5]), 1)
+            max.x <- signif(as.numeric(formatC(seq(0,max(plot.data.log$Drug2Dose), length.out = 5), format = "g", digits = 2)[5]), 1)
+            max.x.point <- max(plot.data.log$Drug2Dose)
+            max.z.point <- max(plot.data.log$Drug1Dose)
+            x.coord <- min(max.x.point/max.x, 1)
+            z.coord <- min(max.z.point/max.z, 1)
+          #Adding legend
+            legend3d("topleft", legend = groups, col = colors[1:(length(groups)+1)][-origin], pch = 16, cex=2, inset=c(0.2, 0.25))
+
+
+```
+
+
+
+```{r}
+# #Saving snapshot
+# snapshot3d(paste(first_drug, second_drug, "3D Plot.png"), webshot = FALSE)
+```
+
+
+## IWP-O1 & SB273005
+
+```{r}
+
+  #Making 3-d plots for Deguelin & SB273005
+first_drug <- "IWP-O1"
+second_drug <- "SB273005"
+    #Navitoclax + Paclitaxel
+      #Getting Data
+NP.data <- All_IDACombo_Scores %>% filter(Drug1 == first_drug & Drug2 == second_drug)
+plot.data <- NP.data[,c("Drug1", "Drug2", "Drug1Dose", "Drug2Dose", "Mean_Combo_Viability", "IDA_Comboscore", "MaxHR")]
+      #Adding group info
+        plot.data$Group <- "Predicted Combination"
+        plot.data$Group[plot.data$Drug1Dose == min(plot.data$Drug1Dose)] <- paste0(unique(plot.data$Drug2), " Monotherapy")
+        plot.data$Group[plot.data$Drug2Dose == min(plot.data$Drug2Dose)] <- paste0(unique(plot.data$Drug1), " Monotherapy")
+        
+        #Adding origin point
+        to.add <- as.data.frame(matrix(c(min(plot.data$Drug1Dose), min(plot.data$Drug1Dose), 
+                                         min(plot.data$Drug1Dose), min(plot.data$Drug1Dose),
+                                         0, 0, 0, 
+                                       "Origin"), ncol = ncol(plot.data)))
+        colnames(to.add) <- colnames(plot.data)
+        plot.data <- rbind(plot.data, to.add)
+
+      #Turning Group column into factor
+        plot.data$Group <- factor(plot.data$Group, levels = c(paste(first_drug, "Monotherapy"), 
+                                                              paste(second_drug, "Monotherapy"), 
+                                                              "Origin", 
+                                                              "Predicted Combination"))
+      #Making doses, viabilities, comboscores, and HRs into numeric
+        plot.data$Drug1Dose <- as.numeric(plot.data$Drug1Dose)
+        plot.data$Drug2Dose <- as.numeric(plot.data$Drug2Dose)
+        plot.data$Mean_Combo_Viability <- as.numeric(plot.data$Mean_Combo_Viability)
+        plot.data$IDA_Comboscore <- as.numeric(plot.data$IDA_Comboscore)
+        plot.data$MaxHR <- as.numeric(plot.data$MaxHR)
+
+
+```
+
+
+
+
+```{r}
+plot.data.log <- plot.data #[plot.data$Group != "Origin", ]
+plot.data.log$Drug1Dose <- log10(plot.data.log$Drug1Dose*1000) # times by 1000 to get nM concentrations
+plot.data.log$Drug2Dose <- log10(plot.data.log$Drug2Dose*1000)
+
+      #Defining Colors
+        colors <- c("blue", "green", "white", "magenta")
+      #Making plots
+        #Plotting Mean Viability
+            scatter3d(x = plot.data.log$Drug2Dose, y = plot.data.log$Mean_Combo_Viability, z = plot.data.log$Drug1Dose, 
+                    surface = F, grid = F, ellipsoid = F, xlab = "", zlab = "", ylab = "", 
+                    groups = plot.data$Group, 
+                    axis.ticks = F, axis.scales = F, 
+                    axis.col = c("blue", "black", "darkgreen"), surface.col = colors, fogtype = "none")
+            
+
+          #Manually adding axis ticks
+            #Note, there is a bug in scatter3d from car_2.1-5 when axis.ticks = T. At line 104,
+            #"x.at <- seq(min.x, max.x, by = nice(diff(range(min.x, max.x))/4))" should be
+            #"x.at <- seq(min.x, max.x, by = diff(range(min.x, max.x))/4)"
+            #There is a newer version of car that may have fixed this, but I would need
+            #to update R and I don't want to risk deprecating the rest of my code for
+            #this project. Thus, manually adding axis marks.
+            
+            at_viability <- seq(0,1, length.out = 5)
+            y.labels <- seq(0,100, length.out = 5)[1:5]
+            
+            at_dose <- seq(0,1, length.out = 9)[2*1:4 + 1]
+            z.exp <- sort(unique(round(plot.data.log$Drug2Dose, digits = 2)))[2*(1:4)]
+            z.labels <- c("10" %p% supsc(z.exp[1]), 
+                          "10" %p% supsc(z.exp[2]), 
+                          "10" %p% supsc(z.exp[3]), 
+                          "10" %p% supsc(z.exp[4]))
+            x.exp <- sort(unique(round(plot.data.log$Drug1Dose, digits = 2)))[2*(1:4)]
+            x.labels <- c("10" %p% supsc(x.exp[1]), 
+                          "10" %p% supsc(x.exp[2]), 
+                          "10" %p% supsc(x.exp[3]), 
+                          "10" %p% supsc(x.exp[4]))
+
+            text3d(-0.05, at_viability, -0.05, 
+                   y.labels, col = "black", cex = 2)
+            text3d(x = at_dose, y = -0.05, z = 0, 
+                   text = x.labels, col = "darkgreen", cex = 2)
+            text3d(x = 0,  y = -0.05, z = at_dose, 
+                   z.labels, col = "blue", cex = 2)
+            
+            # observer3d(0, 0.3, 10) #does not fix the issue
+            # par3d(zoom = 0.1644359)
+            par3d(userMatrix = matrix(c(0.34524330,  0.00000000, -0.9385132,    0,
+                                        0.05206683,  0.99845994,  0.0191534,    0,
+                                        0.93706787, -0.05547799,  0.3447116,    0,
+                                        0.00000000,  0.00000000,  0.0000000,    1), nrow = 4, ncol = 4, byrow = T))
+          
+            par3d(zoom = 0.7106816)
+
+
+          #Organizing groups to omit Origin in legend
+            groups <- levels(plot.data.log$Group)
+            origin <- which(groups == "Origin")
+            groups <- groups[-origin]
+          #Adding flat plane at best monotherapy effect
+            best.monotherapy <- min(plot.data.log$Mean_Combo_Viability[grep("Monotherapy", plot.data.log$Group)])
+            planes3d(a = 0, b = -1, c = 0, d = best.monotherapy/100, alpha = 0.3, col = "green")
+          #Adding arrow between best monotherapy and best combo
+            max.z <- signif(as.numeric(formatC(seq(0,max(plot.data.log$Drug1Dose), length.out = 5), format = "g", digits = 2)[5]), 1)
+            max.x <- signif(as.numeric(formatC(seq(0,max(plot.data.log$Drug2Dose), length.out = 5), format = "g", digits = 2)[5]), 1)
+            max.x.point <- max(plot.data.log$Drug2Dose)
+            max.z.point <- max(plot.data.log$Drug1Dose)
+            x.coord <- min(max.x.point/max.x, 1)
+            z.coord <- min(max.z.point/max.z, 1)
+          #Adding legend
+            legend3d("topleft", legend = groups, col = colors[1:(length(groups)+1)][-origin], pch = 16, cex=2, inset=c(0.1, 0.25))
+
+
+```
+
+
+
+```{r}
+# #Saving snapshot
+# snapshot3d(paste(first_drug, second_drug, "3D Plot.png"), webshot = FALSE)
+```
+
+
