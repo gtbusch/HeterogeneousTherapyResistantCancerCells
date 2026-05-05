@@ -1,0 +1,38 @@
+Conda activate wgsmatching
+
+#Navigate to the alignments folder for each sample. Run the following code from there
+
+REFERENCE="/Users/giannabusch/RajLab Dropbox/Gianna Busch/Shared_GiannaB/Paper_Submission/WorkingPaper/Paper_DataandCode/RawData/WholeGenomeSequencing/RNASeq_forCloneMatching/referencegenome/Homo_sapiens.GRCh38.dna.primary_assembly.fa"
+
+BAM_DIR="/Users/giannabusch/RajLab Dropbox/Gianna Busch/Shared_GiannaB/Paper_Submission/WorkingPaper/Paper_DataandCode/ExtractedData/WholeGenomeSequencing/RNASeq_forCloneMatching/processeddata/RC_Sample1/alignments" 
+
+OUTPUT_DIR="/Users/giannabusch/RajLab Dropbox/Gianna Busch/Shared_GiannaB/Paper_Submission/WorkingPaper/Paper_DataandCode/ExtractedData/WholeGenomeSequencing/RNASeq_forCloneMatching/processeddata/RC_Sample1/alignments/variants" 
+
+# Create output directory
+mkdir -p $OUTPUT_DIR
+
+SAMPLE="RC_Sample1"
+
+# Call variants
+bcftools mpileup -f $REFERENCE --threads 8 -Ou ${BAM_DIR}/${SAMPLE}.bam | \
+bcftools call -mv --threads 8 -Oz -o ${OUTPUT_DIR}/${SAMPLE}_variants.vcf.gz
+
+# Index VCF
+tabix -p vcf ${OUTPUT_DIR}/${SAMPLE}_variants.vcf.gz
+
+# Extract to tab-delimited table
+bcftools query -f '%CHROM\t%POS\t%REF\t%ALT\t%QUAL\t%INFO/DP\t%CHROM:%POS:%REF>%ALT\n' \
+    ${OUTPUT_DIR}/${SAMPLE}_variants.vcf.gz > ${OUTPUT_DIR}/${SAMPLE}_variants.txt
+
+# Add header
+echo -e "CHROM\tPOS\tREF\tALT\tQUAL\tDEPTH\tVARIANT_ID" | \
+    cat - ${OUTPUT_DIR}/${SAMPLE}_variants.txt > ${OUTPUT_DIR}/${SAMPLE}_variants_header.txt
+mv ${OUTPUT_DIR}/${SAMPLE}_variants_header.txt ${OUTPUT_DIR}/${SAMPLE}_variants.txt
+
+echo "Done! Variant table at: ${OUTPUT_DIR}/${SAMPLE}_variants.txt"
+
+# Check how many variants were found
+wc -l ${OUTPUT_DIR}/${SAMPLE}_variants.txt
+head ${OUTPUT_DIR}/${SAMPLE}_variants.txt
+
+# Move all the resulting .txt files to a new folder to run the next script on them

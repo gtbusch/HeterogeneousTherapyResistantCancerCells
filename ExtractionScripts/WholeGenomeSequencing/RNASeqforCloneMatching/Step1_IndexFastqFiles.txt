@@ -1,0 +1,40 @@
+#load environment that hisat2 is installed in
+
+conda activate wgsmatching
+
+#build a reference genome
+
+hisat2-build /Users/giannabusch/'RajLab Dropbox'/'Gianna Busch'/Shared_GiannaB/Paper_Submission/WorkingPaper/Paper_DataandCode/RawData/WholeGenomeSequencing/RNASeq_forCloneMatching/referencegenome/Homo_sapiens.GRCh38.dna.primary_assembly.fa ~/hisat2_grch38
+
+#unzip fastq files
+
+gunzip  RC_Sample1_merged_R1.fastq.gz
+gunzip  RC_Sample1_merged_R2.fastq.gz
+
+## repeat the following steps for each sample
+
+#make a folder for the alignments
+
+mkdir -p alignments
+
+#increase the number of tasks that can be processed
+
+ulimit -n 4096
+
+#align the fasts with hisat2 (make sure reference genome is 
+
+hisat2 -x ~/hisat2_grch38 \
+       -1 RC_Sample1_merged_R1.fastq \
+       -2 RC_Sample1_merged_R2.fastq \
+       -p 8 \
+       --summary-file RC_Sample1_alignment_summary.txt \
+       | samtools view -bS - | samtools sort -o alignments/RC_Sample1.bam
+
+#index alignments
+
+samtools index alignments/RC_Sample1.bam
+
+#check to make sure the file was generated, check stats
+
+ls -lh alignments/
+samtools flagstat alignments/RC_Sample1.bam
